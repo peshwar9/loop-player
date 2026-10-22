@@ -557,7 +557,7 @@
   var startId = null;
   try { startId = clean(new URLSearchParams(location.search).get("v")); } catch (e) {}
   if (startId) openVideo(startId);
-  else if (state.last) { currentId = state.last; renderAll(); }
+  else if (state.last) openVideo(state.last);
 
   var tag = document.createElement("script");
   tag.src = "https://www.youtube.com/iframe_api";

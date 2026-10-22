@@ -210,6 +210,7 @@
     </div>
 
     <div class="row-actions">
+      <button type="button" id="editPlayed">Edit played count</button>
       <button type="button" id="resetVideo">Reset this count</button>
     </div>
     <p class="note">Counts are saved in this browser only. A play is counted each time the video reaches the end.</p>
@@ -545,6 +546,23 @@
     commentStatus.textContent = "Posted count set to " + v.posted + ".";
     save();
     renderComment();
+    renderHistory();
+  });
+
+  $("editPlayed").addEventListener("click", function () {
+    if (!currentId) return;
+    var v = getVideo(currentId);
+    var input = prompt("How many times has this video been played?", v.count);
+    if (input === null) return;
+    var n = parseInt(input, 10);
+    if (isNaN(n) || n < 0) { commentStatus.textContent = "Please enter a whole number."; return; }
+    v.count = n;
+    // Posted can't exceed played; drop a copied message that no longer fits.
+    if (v.posted > n) v.posted = n;
+    if (v.copied > n - v.posted) v.copied = 0;
+    commentStatus.textContent = "Played count set to " + n + ".";
+    save();
+    renderStats();
     renderHistory();
   });
 

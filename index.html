@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loop Player</title>
+<meta name="description" content="Play any YouTube video on repeat, set the speed, and count how many times it played.">
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --card: #ffffff;
+    --text: #1c1c1c;
+    --muted: #6b6b6b;
+    --line: #e4e2dc;
+    --accent: #d93a2b;
+    --accent-soft: #fbe9e6;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121212;
+      --card: #1d1d1d;
+      --text: #f0f0f0;
+      --muted: #a0a0a0;
+      --line: #2e2e2e;
+      --accent: #ff5a47;
+      --accent-soft: #3a1f1b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.45;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 0.95rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  form { display: flex; gap: 8px; }
+  input[type="url"], input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    padding: 12px;
+    font-size: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  button, select {
+    font: inherit;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--text);
+    padding: 10px 14px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .error { color: var(--accent); font-size: 0.9rem; margin-top: 8px; min-height: 1em; }
+  .player-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .player-wrap > div, .player-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .placeholder {
+    display: flex; align-items: center; justify-content: center;
+    color: #bbb; font-size: 0.95rem; text-align: center; padding: 16px;
+  }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    margin-top: 14px;
+  }
+  .control { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
+  .toggle { position: relative; width: 46px; height: 26px; flex: none; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: var(--line);
+    border-radius: 26px; transition: background 0.2s; cursor: pointer;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: transform 0.2s;
+  }
+  .toggle input:checked + .slider { background: var(--accent); }
+  .toggle input:checked + .slider::before { transform: translateX(20px); }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+  .stat { background: var(--accent-soft); border-radius: 10px; padding: 12px; }
+  .stat .num { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .label { color: var(--muted); font-size: 0.85rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  .history { list-style: none; margin: 0; padding: 0; }
+  .history li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0; border-top: 1px solid var(--line);
+  }
+  .history li:first-child { border-top: 0; }
+  .history img { width: 80px; height: 45px; object-fit: cover; border-radius: 6px; flex: none; background: #000; }
+  .history .meta { flex: 1; min-width: 0; }
+  .history .title { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .history .count { color: var(--muted); font-size: 0.82rem; }
+  .history button { padding: 6px 10px; font-size: 0.85rem; }
+  .empty { color: var(--muted); font-size: 0.9rem; }
+  .note { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
+  .row-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Loop Player</h1>
+  <p class="sub">Paste a YouTube link, set the speed, loop it, and see how many times it played.</p>
+
+  <section class="card">
+    <form id="urlForm">
+      <input id="urlInput" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=..." required>
+      <button class="primary" type="submit">Play</button>
+    </form>
+    <div class="error" id="error"></div>
+  </section>
+
+  <section class="card">
+    <div class="player-wrap">
+      <div id="player" class="placeholder">Your video will appear here</div>
+    </div>
+
+    <div class="controls">
+      <label class="control">
+        <span class="toggle">
+          <input type="checkbox" id="loopToggle" checked>
+          <span class="slider"></span>
+        </span>
+        Loop
+      </label>
+      <label class="control">
+        Speed
+        <select id="speedSelect">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="0.75">0.75x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.5">1.5x</option>
+          <option value="1.75">1.75x</option>
+          <option value="2">2x</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="num" id="videoCount">0</div>
+        <div class="label">Plays of this video</div>
+      </div>
+      <div class="stat">
+        <div class="num" id="totalCount">0</div>
+        <div class="label">Plays across all videos</div>
+      </div>
+    </div>
+
+    <div class="row-actions">
+      <button type="button" id="resetVideo">Reset this count</button>
+    </div>
+    <p class="note">Counts are saved in this browser only. A play is counted each time the video reaches the end.</p>
+  </section>
+
+  <section class="card">
+    <h2>Your videos</h2>
+    <ul class="history" id="history"></ul>
+    <p class="empty" id="emptyHistory">No videos yet.</p>
+    <div class="row-actions">
+      <button type="button" id="clearAll">Clear all data</button>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var STORE_KEY = "loopPlayer.v1";
+
+  // ---------- storage ----------
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      var data = raw ? JSON.parse(raw) : null;
+      if (data && data.videos) return data;
+    } catch (e) {}
+    return { videos: {}, last: null };
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+  }
+  var state = load();
+
+  function getVideo(id) {
+    if (!state.videos[id]) {
+      state.videos[id] = { count: 0, speed: 1, loop: true, title: "", updated: Date.now() };
+    }
+    return state.videos[id];
+  }
+
+  // ---------- URL parsing ----------
+  function parseVideoId(input) {
+    var s = (input || "").trim();
+    if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+    try {
+      var u = new URL(s);
+      var host = u.hostname.replace(/^www\.|^m\.|^music\./, "");
+      if (host === "youtu.be") return clean(u.pathname.slice(1));
+      if (host === "youtube.com" || host === "youtube-nocookie.com") {
+        if (u.searchParams.get("v")) return clean(u.searchParams.get("v"));
+        var m = u.pathname.match(/^\/(embed|shorts|live|v)\/([^/?#]+)/);
+        if (m) return clean(m[2]);
+      }
+    } catch (e) {}
+    return null;
+  }
+  function clean(id) {
+    id = (id || "").split(/[?&#/]/)[0];
+    return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  }
+
+  // ---------- elements ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $("urlForm"), urlInput = $("urlInput"), errorEl = $("error");
+  var loopToggle = $("loopToggle"), speedSelect = $("speedSelect");
+  var videoCountEl = $("videoCount"), totalCountEl = $("totalCount");
+  var historyEl = $("history"), emptyHistory = $("emptyHistory");
+
+  var player = null, apiReady = false, currentId = null, pendingId = null;
+
+  // ---------- rendering ----------
+  function totalCount() {
+    var t = 0;
+    for (var k in state.videos) t += state.videos[k].count || 0;
+    return t;
+  }
+  function renderStats() {
+    videoCountEl.textContent = currentId ? getVideo(currentId).count : 0;
+    totalCountEl.textContent = totalCount();
+  }
+  function renderHistory() {
+    var ids = Object.keys(state.videos).sort(function (a, b) {
+      return (state.videos[b].updated || 0) - (state.videos[a].updated || 0);
+    });
+    historyEl.innerHTML = "";
+    emptyHistory.style.display = ids.length ? "none" : "block";
+    ids.forEach(function (id) {
+      var v = state.videos[id];
+      var li = document.createElement("li");
+      var img = document.createElement("img");
+      img.src = "https://i.ytimg.com/vi/" + id + "/mqdefault.jpg";
+      img.alt = "";
+      img.loading = "lazy";
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      var t = document.createElement("div");
+      t.className = "title";
+      t.textContent = v.title || id;
+      var c = document.createElement("div");
+      c.className = "count";
+      c.textContent = v.count + (v.count === 1 ? " play" : " plays") + " · " + v.speed + "x · loop " + (v.loop ? "on" : "off");
+      meta.appendChild(t); meta.appendChild(c);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = id === currentId ? "Playing" : "Play";
+      btn.disabled = id === currentId;
+      btn.addEventListener("click", function () { openVideo(id); });
+      li.appendChild(img); li.appendChild(meta); li.appendChild(btn);
+      historyEl.appendChild(li);
+    });
+  }
+  function renderControls() {
+    if (!currentId) return;
+    var v = getVideo(currentId);
+    loopToggle.checked = !!v.loop;
+    speedSelect.value = String(v.speed);
+    if (speedSelect.value !== String(v.speed)) speedSelect.value = "1";
+  }
+  function renderAll() { renderControls(); renderStats(); renderHistory(); }
+
+  // ---------- player ----------
+  window.onYouTubeIframeAPIReady = function () {
+    apiReady = true;
+    if (pendingId) { var id = pendingId; pendingId = null; openVideo(id); }
+  };
+
+  function openVideo(id) {
+    errorEl.textContent = "";
+    currentId = id;
+    var v = getVideo(id);
+    v.updated = Date.now();
+    state.last = id;
+    save();
+    renderAll();
+
+    if (!apiReady) { pendingId = id; return; }
+
+    if (player && player.loadVideoById) {
+      player.loadVideoById(id);
+      return;
+    }
+    var holder = $("player");
+    holder.className = "";
+    holder.textContent = "";
+    player = new YT.Player("player", {
+      videoId: id,
+      playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+      events: {
+        onReady: function (e) {
+          applySpeed();
+          e.target.playVideo();
+        },
+        onStateChange: onStateChange,
+        onError: function () {
+          errorEl.textContent = "This video can't be played here. The owner may have turned off embedding.";
+        }
+      }
+    });
+  }
+
+  function applySpeed() {
+    if (!player || !player.setPlaybackRate || !currentId) return;
+    player.setPlaybackRate(getVideo(currentId).speed);
+  }
+
+  function onStateChange(e) {
+    if (!currentId) return;
+    var v = getVideo(currentId);
+
+    if (e.data === YT.PlayerState.PLAYING) {
+      // Capture the title once and keep speed in sync after each (re)start.
+      try {
+        var d = player.getVideoData();
+        if (d && d.title && v.title !== d.title) { v.title = d.title; save(); renderHistory(); }
+      } catch (err) {}
+      if (player.getPlaybackRate && player.getPlaybackRate() !== v.speed) applySpeed();
+    }
+
+    if (e.data === YT.PlayerState.ENDED) {
+      v.count += 1;
+      v.updated = Date.now();
+      save();
+      renderStats();
+      renderHistory();
+      if (v.loop) {
+        player.seekTo(0, true);
+        player.playVideo();
+      }
+    }
+  }
+
+  // ---------- events ----------
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var id = parseVideoId(urlInput.value);
+    if (!id) { errorEl.textContent = "That doesn't look like a YouTube video link."; return; }
+    urlInput.value = "";
+    urlInput.blur();
+    openVideo(id);
+  });
+
+  loopToggle.addEventListener("change", function () {
+    if (!currentId) return;
+    getVideo(currentId).loop = loopToggle.checked;
+    save();
+    renderHistory();
+  });
+
+  speedSelect.addEventListener("change", function () {
+    if (!currentId) return;
+    getVideo(currentId).speed = parseFloat(speedSelect.value);
+    save();
+    applySpeed();
+    renderHistory();
+  });
+
+  $("resetVideo").addEventListener("click", function () {
+    if (!currentId) return;
+    if (!confirm("Reset the play count for this video?")) return;
+    getVideo(currentId).count = 0;
+    save();
+    renderStats();
+    renderHistory();
+  });
+
+  $("clearAll").addEventListener("click", function () {
+    if (!confirm("Remove all saved videos and counts from this browser?")) return;
+    state = { videos: {}, last: null };
+    save();
+    currentId = null;
+    renderStats();
+    renderHistory();
+  });
+
+  // ---------- start ----------
+  renderAll();
+
+  // Support links like yoursite.com/?v=VIDEO_ID for sharing.
+  var startId = null;
+  try { startId = clean(new URLSearchParams(location.search).get("v")); } catch (e) {}
+  if (startId) openVideo(startId);
+  else if (state.last) { currentId = state.last; renderAll(); }
+
+  var tag = document.createElement("script");
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
+})();
+</script>
+</body>
+</html>

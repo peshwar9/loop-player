@@ -247,6 +247,23 @@
   }
   var state = load();
 
+  // Videos that come pre-installed in "Your videos". Add more here.
+  var PRESETS = [
+    { id: "gN7cODH1T1E", title: "Lalita Sahasranama Stotra" },
+    { id: "_3PmWQ0lENE", title: "Datta Raksha Mantra (Flute)" }
+  ];
+  function seedPresets() {
+    PRESETS.forEach(function (p) {
+      if (!state.videos[p.id]) {
+        state.videos[p.id] = { count: 0, speed: 1, loop: true, title: p.title, updated: 0, posted: 0, copied: 0 };
+      } else if (!state.videos[p.id].title) {
+        state.videos[p.id].title = p.title;
+      }
+    });
+    save();
+  }
+  seedPresets();
+
   function getVideo(id) {
     if (!state.videos[id]) {
       state.videos[id] = { count: 0, speed: 1, loop: true, title: "", updated: Date.now() };
@@ -431,10 +448,10 @@
     var v = getVideo(currentId);
 
     if (e.data === YT.PlayerState.PLAYING) {
-      // Capture the title once and keep speed in sync after each (re)start.
+      // Capture the title once (keeping preset names) and keep speed in sync after each (re)start.
       try {
         var d = player.getVideoData();
-        if (d && d.title && v.title !== d.title) { v.title = d.title; save(); renderHistory(); }
+        if (d && d.title && !v.title) { v.title = d.title; save(); renderHistory(); }
       } catch (err) {}
       if (player.getPlaybackRate && player.getPlaybackRate() !== v.speed) applySpeed();
     }
@@ -489,9 +506,9 @@
   });
 
   $("clearAll").addEventListener("click", function () {
-    if (!confirm("Remove all saved videos and counts from this browser?")) return;
+    if (!confirm("Remove all your videos and counts from this browser? The built-in videos stay, with their counts reset.")) return;
     state = { videos: {}, last: null, profile: state.profile };
-    save();
+    seedPresets();
     currentId = null;
     renderStats();
     renderHistory();

@@ -116,6 +116,17 @@
   .empty { color: var(--muted); font-size: 0.9rem; }
   .note { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
   .row-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .fields label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+  .comment-box { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .message {
+    padding: 12px; border: 1px dashed var(--line); border-radius: 10px;
+    background: var(--bg); font-size: 0.95rem; word-break: break-word; min-height: 1.45em;
+  }
+  .message.muted { color: var(--muted); }
+  .status { color: var(--muted); font-size: 0.85rem; margin-top: 8px; min-height: 1em; }
+  button.link { background: none; border: 0; padding: 0; color: var(--muted); text-decoration: underline; font-size: 0.85rem; }
 </style>
 </head>
 <body>
@@ -129,6 +140,15 @@
       <button class="primary" type="submit">Play</button>
     </form>
     <div class="error" id="error"></div>
+  </section>
+
+  <section class="card">
+    <h2>Your details</h2>
+    <div class="fields">
+      <label>Name<input id="nameInput" type="text" autocomplete="off" placeholder="Ravi"></label>
+      <label>ID<input id="idInput" type="text" autocomplete="off" placeholder="7889"></label>
+    </div>
+    <p class="note">Used in the comment message. Saved in this browser.</p>
   </section>
 
   <section class="card">
@@ -168,6 +188,25 @@
         <div class="num" id="totalCount">0</div>
         <div class="label">Plays across all videos</div>
       </div>
+      <div class="stat">
+        <div class="num" id="postedCount">0</div>
+        <div class="label">Posted in comments</div>
+      </div>
+      <div class="stat">
+        <div class="num" id="pendingCount">0</div>
+        <div class="label">Not yet posted</div>
+      </div>
+    </div>
+
+    <div class="comment-box">
+      <h2>Comment message</h2>
+      <div class="message muted" id="message">Play a video to see your message.</div>
+      <div class="row-actions">
+        <button type="button" class="primary" id="copyBtn">Copy comment</button>
+        <button type="button" id="postedBtn">I posted it</button>
+      </div>
+      <div class="status" id="commentStatus"></div>
+      <button type="button" class="link" id="editPosted">Edit posted count</button>
     </div>
 
     <div class="row-actions">
@@ -195,9 +234,12 @@
     try {
       var raw = localStorage.getItem(STORE_KEY);
       var data = raw ? JSON.parse(raw) : null;
-      if (data && data.videos) return data;
+      if (data && data.videos) {
+        if (!data.profile) data.profile = { name: "", id: "" };
+        return data;
+      }
     } catch (e) {}
-    return { videos: {}, last: null };
+    return { videos: {}, last: null, profile: { name: "", id: "" } };
   }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
@@ -208,8 +250,12 @@
     if (!state.videos[id]) {
       state.videos[id] = { count: 0, speed: 1, loop: true, title: "", updated: Date.now() };
     }
-    return state.videos[id];
+    var v = state.videos[id];
+    if (v.posted == null) v.posted = 0; // plays already posted in comments
+    if (v.copied == null) v.copied = 0; // plays in the last copied message, awaiting "I posted it"
+    return v;
   }
+  function pendingFor(v) { return Math.max(0, v.count - v.posted); }
 
   // ---------- URL parsing ----------
   function parseVideoId(input) {
@@ -238,6 +284,10 @@
   var loopToggle = $("loopToggle"), speedSelect = $("speedSelect");
   var videoCountEl = $("videoCount"), totalCountEl = $("totalCount");
   var historyEl = $("history"), emptyHistory = $("emptyHistory");
+  var nameInput = $("nameInput"), idInput = $("idInput");
+  var postedCountEl = $("postedCount"), pendingCountEl = $("pendingCount");
+  var messageEl = $("message"), copyBtn = $("copyBtn"), postedBtn = $("postedBtn");
+  var commentStatus = $("commentStatus"), editPosted = $("editPosted");
 
   var player = null, apiReady = false, currentId = null, pendingId = null;
 
@@ -250,6 +300,44 @@
   function renderStats() {
     videoCountEl.textContent = currentId ? getVideo(currentId).count : 0;
     totalCountEl.textContent = totalCount();
+    renderComment();
+  }
+
+  // ---------- comment message ----------
+  function buildMessage(n) {
+    return state.profile.name.trim() + " " + state.profile.id.trim() + " " + n + " times . Sri Matre Namaha";
+  }
+  function renderComment() {
+    var v = currentId ? getVideo(currentId) : null;
+    var pending = v ? pendingFor(v) : 0;
+    var hasProfile = state.profile.name.trim() && state.profile.id.trim();
+    postedCountEl.textContent = v ? v.posted : 0;
+    pendingCountEl.textContent = pending;
+    editPosted.style.display = v ? "" : "none";
+
+    messageEl.classList.add("muted");
+    if (!v) messageEl.textContent = "Play a video to see your message.";
+    else if (!hasProfile) messageEl.textContent = "Enter your name and ID above.";
+    else if (!pending) messageEl.textContent = "No new plays to post yet.";
+    else { messageEl.textContent = buildMessage(pending); messageEl.classList.remove("muted"); }
+
+    copyBtn.disabled = !(v && hasProfile && pending);
+    postedBtn.disabled = !(v && v.copied);
+    postedBtn.textContent = v && v.copied ? "I posted it (" + v.copied + ")" : "I posted it";
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) {}
+      document.body.removeChild(ta);
+      ok ? resolve() : reject();
+    });
   }
   function renderHistory() {
     var ids = Object.keys(state.videos).sort(function (a, b) {
@@ -271,7 +359,7 @@
       t.textContent = v.title || id;
       var c = document.createElement("div");
       c.className = "count";
-      c.textContent = v.count + (v.count === 1 ? " play" : " plays") + " · " + v.speed + "x · loop " + (v.loop ? "on" : "off");
+      c.textContent = v.count + (v.count === 1 ? " play" : " plays") + " · " + v.posted + " posted · " + v.speed + "x · loop " + (v.loop ? "on" : "off");
       meta.appendChild(t); meta.appendChild(c);
       var btn = document.createElement("button");
       btn.type = "button";
@@ -299,6 +387,7 @@
 
   function openVideo(id) {
     errorEl.textContent = "";
+    commentStatus.textContent = "";
     currentId = id;
     var v = getVideo(id);
     v.updated = Date.now();
@@ -389,8 +478,10 @@
 
   $("resetVideo").addEventListener("click", function () {
     if (!currentId) return;
-    if (!confirm("Reset the play count for this video?")) return;
-    getVideo(currentId).count = 0;
+    if (!confirm("Reset the play and posted counts for this video?")) return;
+    var v = getVideo(currentId);
+    v.count = 0; v.posted = 0; v.copied = 0;
+    commentStatus.textContent = "";
     save();
     renderStats();
     renderHistory();
@@ -398,14 +489,68 @@
 
   $("clearAll").addEventListener("click", function () {
     if (!confirm("Remove all saved videos and counts from this browser?")) return;
-    state = { videos: {}, last: null };
+    state = { videos: {}, last: null, profile: state.profile };
     save();
     currentId = null;
     renderStats();
     renderHistory();
   });
 
+  function saveProfile() {
+    state.profile.name = nameInput.value;
+    state.profile.id = idInput.value;
+    save();
+    renderComment();
+  }
+  nameInput.addEventListener("input", saveProfile);
+  idInput.addEventListener("input", saveProfile);
+
+  copyBtn.addEventListener("click", function () {
+    if (!currentId) return;
+    var v = getVideo(currentId);
+    var n = pendingFor(v);
+    if (!n) return;
+    copyText(buildMessage(n)).then(function () {
+      // Remember exactly what was copied; plays may keep counting before it's posted.
+      v.copied = n;
+      save();
+      renderComment();
+      commentStatus.textContent = "Copied. Paste it on YouTube, then tap “I posted it”.";
+    }, function () {
+      commentStatus.textContent = "Couldn't copy automatically. Select the message above and copy it.";
+    });
+  });
+
+  postedBtn.addEventListener("click", function () {
+    if (!currentId) return;
+    var v = getVideo(currentId);
+    if (!v.copied) return;
+    v.posted = Math.min(v.count, v.posted + v.copied);
+    commentStatus.textContent = "Marked " + v.copied + " as posted.";
+    v.copied = 0;
+    save();
+    renderComment();
+    renderHistory();
+  });
+
+  editPosted.addEventListener("click", function () {
+    if (!currentId) return;
+    var v = getVideo(currentId);
+    var input = prompt("How many plays of this video have been posted in comments?", v.posted);
+    if (input === null) return;
+    var n = parseInt(input, 10);
+    if (isNaN(n) || n < 0) { commentStatus.textContent = "Please enter a whole number."; return; }
+    v.posted = Math.min(n, v.count);
+    v.copied = 0;
+    commentStatus.textContent = "Posted count set to " + v.posted + ".";
+    save();
+    renderComment();
+    renderHistory();
+  });
+
   // ---------- start ----------
+  nameInput.value = state.profile.name;
+  idInput.value = state.profile.id;
   renderAll();
 
   // Support links like yoursite.com/?v=VIDEO_ID for sharing.
